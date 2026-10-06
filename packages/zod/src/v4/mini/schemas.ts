@@ -1727,6 +1727,40 @@ export function pipe<
   }) as any;
 }
 
+// ZodMiniStagePipe
+export interface ZodMiniStagePipe<
+  A extends SomeType = core.$ZodType,
+  T = unknown,
+  B extends SomeType = core.$ZodType,
+> extends _ZodMiniType<core.$ZodStagePipeInternals<A, T, B>> {
+  // _zod: core.$ZodStagePipeInternals<A, T, B>;
+}
+export const ZodMiniStagePipe: core.$constructor<ZodMiniStagePipe> = /*@__PURE__*/ core.$constructor(
+  "ZodMiniStagePipe",
+  (inst, def) => {
+    core.$ZodStagePipe.init(inst, def);
+    ZodMiniType.init(inst, def);
+  }
+);
+
+// @__NO_SIDE_EFFECTS__
+export function stagePipe<
+  const A extends SomeType,
+  T,
+  B extends SomeType,
+>(
+  in_: A,
+  transform: (value: core.output<A>, payload: core.ParsePayload<core.output<A>>) => T,
+  out: B
+): ZodMiniStagePipe<A, T, B> {
+  return new ZodMiniStagePipe({
+    type: "stagepipe",
+    in: in_ as any as core.$ZodType,
+    transform,
+    out: out as any as core.$ZodType,
+  }) as any;
+}
+
 // ZodMiniCodec
 export interface ZodMiniCodec<A extends SomeType = core.$ZodType, B extends SomeType = core.$ZodType>
   extends ZodMiniPipe<A, B>,

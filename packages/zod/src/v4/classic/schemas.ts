@@ -2565,6 +2565,45 @@ export function pipe(in_: core.SomeType, out: core.SomeType) {
   });
 }
 
+// ZodStagePipe
+export interface ZodStagePipe<
+  A extends core.SomeType = core.$ZodType,
+  T = unknown,
+  B extends core.SomeType = core.$ZodType,
+> extends _ZodType<core.$ZodStagePipeInternals<A, T, B>>,
+    core.$ZodStagePipe<A, T, B> {
+  "~standard": ZodStandardSchemaWithJSON<this>;
+  in: A;
+  out: B;
+}
+export const ZodStagePipe: core.$constructor<ZodStagePipe> = /*@__PURE__*/ core.$constructor(
+  "ZodStagePipe",
+  (inst, def) => {
+    core.$ZodStagePipe.init(inst, def);
+    ZodType.init(inst, def);
+
+    inst.in = def.in;
+    inst.out = def.out;
+  }
+);
+
+export function stagePipe<
+  const A extends core.SomeType,
+  T,
+  B extends core.SomeType,
+>(
+  in_: A,
+  transform: (value: core.output<A>, payload: core.ParsePayload<core.output<A>>) => T,
+  out: B
+): ZodStagePipe<A, T, B> {
+  return new ZodStagePipe({
+    type: "stagepipe",
+    in: in_ as unknown as core.$ZodType,
+    transform,
+    out: out as unknown as core.$ZodType,
+  });
+}
+
 // ZodCodec
 export interface ZodCodec<A extends core.SomeType = core.$ZodType, B extends core.SomeType = core.$ZodType>
   extends ZodPipe<A, B>,

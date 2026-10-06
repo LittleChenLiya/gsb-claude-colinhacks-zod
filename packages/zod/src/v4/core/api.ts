@@ -1590,6 +1590,26 @@ export function _pipe<
   }) as any;
 }
 
+// ZodStagePipe
+// @__NO_SIDE_EFFECTS__
+export function _stagePipe<
+  const A extends schemas.$ZodType,
+  T,
+  B extends schemas.$ZodType,
+>(
+  Class: util.SchemaClass<schemas.$ZodStagePipe>,
+  in_: A,
+  transform: (value: core.output<A>, payload: schemas.ParsePayload<core.output<A>>) => T,
+  out: B
+): schemas.$ZodStagePipe<A, T, B> {
+  return new Class({
+    type: "stagepipe",
+    in: in_,
+    transform,
+    out,
+  }) as any;
+}
+
 // ZodReadonly
 export type $ZodReadonlyParams = TypeParams<schemas.$ZodReadonly, "innerType">;
 // @__NO_SIDE_EFFECTS__

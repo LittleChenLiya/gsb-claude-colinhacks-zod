@@ -144,6 +144,11 @@ export function visit(schema: schemas.SomeType, fnOrHandlers: VisitFn | VisitHan
         const newOut = run(def.out);
         return newIn === def.in && newOut === def.out ? s : clone(s, { ...def, in: newIn, out: newOut });
       }
+      case "stagepipe": {
+        const newIn = run(def.in);
+        const newOut = run(def.out);
+        return newIn === def.in && newOut === def.out ? s : clone(s, { ...def, in: newIn, out: newOut });
+      }
       case "function": {
         const newInput = run(def.input);
         const newOutput = run(def.output);

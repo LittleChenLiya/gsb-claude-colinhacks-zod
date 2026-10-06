@@ -2,8 +2,18 @@ import * as core from "../core/index.js";
 import { type ZodError, ZodRealError } from "./errors.js";
 
 export type ZodSafeParseResult<T> = ZodSafeParseSuccess<T> | ZodSafeParseError<T>;
-export type ZodSafeParseSuccess<T> = { success: true; data: T; error?: never };
-export type ZodSafeParseError<T> = { success: false; data?: never; error: ZodError<T> };
+export type ZodSafeParseSuccess<T> = {
+  success: true;
+  data: T;
+  error?: never;
+  stage?: core.ParsePayload["stage"];
+};
+export type ZodSafeParseError<T> = {
+  success: false;
+  data?: never;
+  error: ZodError<T>;
+  stage?: core.ParsePayload["stage"];
+};
 
 export const parse: <T extends core.$ZodType>(
   schema: T,

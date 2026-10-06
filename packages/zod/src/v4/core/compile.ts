@@ -1085,6 +1085,9 @@ function generateCheck(
     case "pipe":
       typeAccessor = generatePipeCheck(doc, ctx, schema, accessor);
       break;
+    case "stagepipe":
+      typeAccessor = generateStagePipeCheck(doc, ctx, schema, accessor);
+      break;
     case "custom":
       typeAccessor = generateCustomCheck(doc, ctx, schema, accessor);
       break;
@@ -1465,6 +1468,8 @@ function fastPathAcceptsAbsence(schema: SomeType): boolean {
       return fastPathAcceptsAbsence(def.left) && fastPathAcceptsAbsence(def.right);
     case "pipe":
       return def.in ? fastPathAcceptsAbsence(def.in) : true;
+    case "stagepipe":
+      return def.in ? fastPathAcceptsAbsence(def.in) : true;
     default:
       return true;
   }
@@ -1525,6 +1530,8 @@ function mayOutputUndefined(schema: SomeType): boolean {
     case "intersection":
       return !def.left || !def.right || mayOutputUndefined(def.left) || mayOutputUndefined(def.right);
     case "pipe":
+      return def.out ? mayOutputUndefined(def.out) : true;
+    case "stagepipe":
       return def.out ? mayOutputUndefined(def.out) : true;
     default:
       // any/unknown/undefined/void/default/prefault/transform/custom/lazy/catch
@@ -2207,6 +2214,34 @@ function generatePipeCheck(doc: Doc, ctx: CompileContext, schema: SomeType, acce
     // No transform - validate output type on same value
     return generateCheck(doc, ctx, def.out, inputOutput);
   }
+}
+
+function generateStagePipeCheck(doc: Doc, ctx: CompileContext, schema: SomeType, accessor: string): string {
+  const def = schema._zod.def as unknown as {
+    in: SomeType;
+    out: SomeType;
+    transform: (value: unknown, payload: unknown) => unknown;
+  };
+
+  // Validate input type first
+  const inputOutput = generateCheck(doc, ctx, def.in, accessor);
+
+  // Apply transform and validate output. The compiled path returns INVALID on any failure, which falls back to the runtime for stage tracking.
+  if (isAsyncFunction(def.transform)) {
+    throw new ZodCompileAsyncError("z.compile: async transforms in stage pipes are not supported");
+  }
+  const transformFn = def.transform;
+  const helperFn = (value: unknown): unknown => {
+    const fakePayload = { value, issues: [] as unknown[], addIssue: pushIssue };
+    const result = transformFn(value, fakePayload as any);
+    if (result instanceof Promise) return INVALID;
+    return fakePayload.issues.length === 0 ? result : INVALID;
+  };
+  const helperConst = addUserConstant(ctx, helperFn);
+  const transformedVar = newVar(ctx);
+  doc.write(`const ${transformedVar} = ${helperConst}(${inputOutput});`);
+  doc.write(`if (${transformedVar} === INVALID) return INVALID;`);
+  return generateCheck(doc, ctx, def.out, transformedVar);
 }
 
 function isAsyncFunction(fn: unknown): boolean {

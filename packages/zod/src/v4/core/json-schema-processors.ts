@@ -800,6 +800,14 @@ export const pipeProcessor: Processor<schemas.$ZodPipe> = (schema, ctx, _json, p
   seen.ref = innerType;
 };
 
+export const stagePipeProcessor: Processor<schemas.$ZodStagePipe> = (schema, ctx, _json, params) => {
+  const def = schema._zod.def as schemas.$ZodStagePipeDef;
+  const innerType = ctx.io === "input" ? def.in : def.out;
+  processSchema(innerType, ctx as any, params);
+  const seen = ctx.seen.get(schema)!;
+  seen.ref = innerType;
+};
+
 export const readonlyProcessor: Processor<schemas.$ZodReadonly> = (schema, ctx, json, params) => {
   const def = schema._zod.def as schemas.$ZodReadonlyDef;
   processSchema(def.innerType, ctx as any, params);
@@ -867,6 +875,7 @@ export const allProcessors: Record<string, Processor<any>> = {
   prefault: prefaultProcessor,
   catch: catchProcessor,
   pipe: pipeProcessor,
+  stagepipe: stagePipeProcessor,
   readonly: readonlyProcessor,
   promise: promiseProcessor,
   optional: optionalProcessor,

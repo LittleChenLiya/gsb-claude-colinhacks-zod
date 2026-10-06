@@ -46,6 +46,8 @@ export interface ParsePayload<T = unknown> {
   issues: errors.$ZodRawIssue[];
   /** A way to mark a whole payload as aborted. Used in codecs/pipes. */
   aborted?: boolean;
+  /** Records which stage of a stage pipe failed: "input", "transform", or "output". */
+  stage?: "input" | "transform" | "output";
   /** @internal Set when the value came from a repeat visit to a node still being
    * parsed. Its checks run on the node itself, against the finished value. */
   memo?: boolean | undefined;
@@ -91,6 +93,7 @@ export interface $ZodTypeDef {
     | "catch"
     | "nan"
     | "pipe"
+    | "stagepipe"
     | "readonly"
     | "template_literal"
     | "promise"
@@ -4455,6 +4458,73 @@ function handlePipeResult(left: ParsePayload, next: $ZodType, ctx: ParseContextI
   }
   return next._zod.run({ value: left.value, issues: left.issues }, ctx);
 }
+
+////////////////////////////////////////////
+////////////////////////////////////////////
+//////////                        //////////
+//////////    $ZodStagePipe       //////////
+//////////                        //////////
+////////////////////////////////////////////
+////////////////////////////////////////////
+export interface $ZodStagePipeDef<A extends SomeType = $ZodType, T = unknown, B extends SomeType = $ZodType>
+  extends $ZodTypeDef {
+  type: "stagepipe";
+  in: A;
+  transform: (value: core.output<A>, payload: ParsePayload<core.output<A>>) => T;
+  out: B;
+}
+
+export interface $ZodStagePipeInternals<A extends SomeType = $ZodType, T = unknown, B extends SomeType = $ZodType>
+  extends $ZodTypeInternals<core.output<B>, core.input<A>> {
+  def: $ZodStagePipeDef<A, T, B>;
+  isst: never;
+  values: A["_zod"]["values"];
+  optin: A["_zod"]["optin"];
+  optout: B["_zod"]["optout"];
+  propValues: A["_zod"]["propValues"];
+}
+
+export interface $ZodStagePipe<A extends SomeType = $ZodType, T = unknown, B extends SomeType = $ZodType>
+  extends $ZodType {
+  _zod: $ZodStagePipeInternals<A, T, B>;
+}
+
+export const $ZodStagePipe: core.$constructor<$ZodStagePipe> = /*@__PURE__*/ core.$constructor(
+  "$ZodStagePipe",
+  (inst, def) => {
+    $ZodType.init(inst, def);
+    util.defineLazyInternal(inst, "values", (zod) => zod.def.in._zod.values);
+    util.defineLazyInternal(inst, "optin", (zod) => zod.def.in._zod.optin);
+    util.defineLazyInternal(inst, "optout", (zod) => zod.def.out._zod.optout);
+    util.defineLazyInternal(inst, "propValues", (zod) => zod.def.in._zod.propValues);
+
+    inst._zod.parse = (payload, ctx) => {
+      // Stage 1: input validation.
+      const left = def.in._zod.run(payload, ctx);
+      if (left.issues.length) {
+        left.stage = "input";
+        left.aborted = true;
+        return left;
+      }
+      // Stage 2: transform, called exactly once.
+      const transformed = def.transform(left.value, left);
+      if (left.issues.length) {
+        left.stage = "transform";
+        left.aborted = true;
+        return left;
+      }
+      // Stage 3: output validation runs on the transform's return value.
+      const right = def.out._zod.run({ value: transformed, issues: left.issues }, ctx);
+      if (right.issues.length) {
+        right.stage = "output";
+        right.aborted = true;
+        return right;
+      }
+      right.stage = "output";
+      return right;
+    };
+  }
+);
 
 ////////////////////////////////////////////
 ////////////////////////////////////////////

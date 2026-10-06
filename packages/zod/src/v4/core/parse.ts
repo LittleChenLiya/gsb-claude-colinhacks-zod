@@ -66,7 +66,7 @@ export type $SafeParse = <T extends schemas.$ZodType>(
   schema: T,
   value: unknown,
   _ctx?: schemas.ParseContext<errors.$ZodIssue>
-) => util.SafeParseResult<core.output<T>>;
+) => util.SafeParseResult<core.output<T>> & { stage?: schemas.ParsePayload["stage"] };
 
 export const _safeParse: (_Err: $ZodErrorClass) => $SafeParse = (_Err) => (schema, value, _ctx) => {
   const ctx: schemas.ParseContextInternal = _ctx ? { ..._ctx, async: false } : { async: false };
@@ -75,16 +75,27 @@ export const _safeParse: (_Err: $ZodErrorClass) => $SafeParse = (_Err) => (schem
     throw new core.$ZodAsyncError();
   }
 
-  return result.issues.length ? failure(_Err, result.issues, ctx) : ({ success: true, data: result.value } as any);
+  if (result.issues.length) {
+    return failure(_Err, result.issues, ctx, result.stage);
+  }
+  const success: any = { success: true, data: result.value };
+  if (result.stage !== undefined) success.stage = result.stage;
+  return success;
 };
 export const safeParse: $SafeParse = /* @__PURE__*/ _safeParse(errors.$ZodRealError);
 
 // the error is built on the first read of `error`: finalizing the issues and constructing the instance is most of a failing parse, and a caller that only branches on `success` never pays it. a getter in the literal keeps this small; the alternative, one shared accessor descriptor plus a hidden state slot, reads ~15% faster but costs ~75 B gzipped in every bundle
-function failure(Err: $ZodErrorClass, issues: errors.$ZodRawIssue[], ctx: schemas.ParseContextInternal): any {
+function failure(
+  Err: $ZodErrorClass,
+  issues: errors.$ZodRawIssue[],
+  ctx: schemas.ParseContextInternal,
+  stage?: schemas.ParsePayload["stage"]
+): any {
   let error: errors.$ZodError | undefined;
-  return {
-    success: false,
-    get error() {
+  const result: any = { success: false };
+  if (stage !== undefined) result.stage = stage;
+  Object.defineProperty(result, "error", {
+    get() {
       if (!error) {
         error = new Err(issues.map((iss) => util.finalizeIssue(iss, ctx, core.config())));
         // finalizeIssue drops `input`, so the built error holds nothing; keeping the raw issues past this point pins the parsed value for the life of the result
@@ -93,27 +104,35 @@ function failure(Err: $ZodErrorClass, issues: errors.$ZodRawIssue[], ctx: schema
       }
       return error;
     },
-    set error(e: errors.$ZodError) {
+    set(e: errors.$ZodError) {
       error = e;
       // a replacement makes the getter's branch unreachable, so the captures have to go here too
       issues = undefined as any;
       ctx = undefined as any;
     },
-  };
+    enumerable: true,
+    configurable: true,
+  });
+  return result;
 }
 
 export type $SafeParseAsync = <T extends schemas.$ZodType>(
   schema: T,
   value: unknown,
   _ctx?: schemas.ParseContext<errors.$ZodIssue>
-) => Promise<util.SafeParseResult<core.output<T>>>;
+) => Promise<util.SafeParseResult<core.output<T>> & { stage?: schemas.ParsePayload["stage"] }>;
 
 export const _safeParseAsync: (_Err: $ZodErrorClass) => $SafeParseAsync = (_Err) => async (schema, value, _ctx) => {
   const ctx: schemas.ParseContextInternal = _ctx ? { ..._ctx, async: true } : { async: true };
   let result = schema._zod.run({ value, issues: [] }, ctx);
   if (result instanceof Promise) result = await result;
 
-  return result.issues.length ? failure(_Err, result.issues, ctx) : ({ success: true, data: result.value } as any);
+  if (result.issues.length) {
+    return failure(_Err, result.issues, ctx, result.stage);
+  }
+  const success: any = { success: true, data: result.value };
+  if (result.stage !== undefined) success.stage = result.stage;
+  return success;
 };
 
 export const safeParseAsync: $SafeParseAsync = /* @__PURE__*/ _safeParseAsync(errors.$ZodRealError);
