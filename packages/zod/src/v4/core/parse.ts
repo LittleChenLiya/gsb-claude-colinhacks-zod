@@ -62,6 +62,40 @@ export const _parseAsync: (_Err: $ZodErrorClass) => $ParseAsync = (_Err) => {
 
 export const parseAsync: $ParseAsync = /* @__PURE__*/ _parseAsync(errors.$ZodRealError);
 
+export type $ParseArrayAsync = <T extends readonly schemas.$ZodType[]>(
+  schemas: T,
+  values: readonly unknown[],
+  _ctx?: schemas.ParseContext<errors.$ZodIssue>,
+  _params?: $ParseParams
+) => Promise<{ [K in keyof T]: core.output<T[K]> }>;
+
+// Parses `values[i]` against `schemas[i]` for every index. All items start before any result is
+// awaited, so independent async work overlaps; results and issue paths keep the original indices
+// no matter which promise settles first, and a failing item never shifts a later item's index.
+export const _parseArrayAsync: (_Err: $ZodErrorClass) => $ParseArrayAsync = (_Err) => {
+  const fn: $ParseArrayAsync = async (schemas, values, _ctx, params) => {
+    const ctx: schemas.ParseContextInternal = _ctx ? { ..._ctx, async: true } : { async: true };
+    const results = await Promise.all(
+      schemas.map((schema, i) => schema._zod.run({ value: values[i], issues: [] }, ctx))
+    );
+    const issues: errors.$ZodIssue[] = [];
+    for (let i = 0; i < results.length; i++) {
+      for (const iss of results[i].issues) {
+        issues.push(util.finalizeIssue({ ...iss, path: iss.path ? [i, ...iss.path] : [i] }, ctx, core.config()));
+      }
+    }
+    if (issues.length) {
+      const e = new (params?.Err ?? _Err)(issues);
+      util.captureStackTrace(e, params?.callee ?? fn);
+      throw e;
+    }
+    return results.map((r) => r.value) as any;
+  };
+  return fn;
+};
+
+export const parseArrayAsync: $ParseArrayAsync = /* @__PURE__*/ _parseArrayAsync(errors.$ZodRealError);
+
 export type $SafeParse = <T extends schemas.$ZodType>(
   schema: T,
   value: unknown,

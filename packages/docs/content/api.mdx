@@ -2630,6 +2630,19 @@ const userId = z.string().refine(async (id) => {
   </Tabs>
 </Callout>
 
+To parse several independent values against different schemas in one async call, use `z.parseArrayAsync`. Each schema runs exactly once; the items are parsed concurrently, but the results and any issue paths always keep the original indices.
+
+```ts
+const [name, age] = await z.parseArrayAsync(
+  [z.string(), z.number()],
+  ["alice", 30]
+);
+
+// if an item fails, its issues are prefixed with its original index
+await z.parseArrayAsync([z.string(), z.string()], ["ok", 42]);
+// ZodError: issues[0].path => [1]
+```
+
 #### `when`
 
 > **Note** — This is a power user feature and can absolutely be abused in ways that will increase the probability of uncaught errors originating from inside your refinements. 

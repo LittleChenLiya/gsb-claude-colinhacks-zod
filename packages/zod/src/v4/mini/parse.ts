@@ -4,6 +4,7 @@ export {
   parse,
   safeParse,
   parseAsync,
+  parseArrayAsync,
   safeParseAsync,
   encode,
   decode,

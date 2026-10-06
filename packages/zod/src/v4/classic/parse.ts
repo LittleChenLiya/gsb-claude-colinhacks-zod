@@ -19,6 +19,30 @@ export const parseAsync: <T extends core.$ZodType>(
   _params?: { callee?: core.util.AnyFunc; Err?: core.$ZodErrorClass }
 ) => Promise<core.output<T>> = /* @__PURE__ */ core._parseAsync(ZodRealError);
 
+/**
+ * Parses `values[i]` against `schemas[i]` for every index, in parallel.
+ *
+ * Each schema runs exactly once. All items start before any result is awaited, so independent
+ * async work may settle in any order, but the returned tuple and every issue path keep the
+ * original indices — a failure in item `i` surfaces with path `[i, ...]`, and failing items never
+ * shift the indices of later items. On any failure a single `ZodError` with all collected issues
+ * is thrown.
+ *
+ * @example
+ * ```ts
+ * const [name, age] = await z.parseArrayAsync(
+ *   [z.string(), z.number()],
+ *   ["alice", 30]
+ * );
+ * ```
+ */
+export const parseArrayAsync: <T extends readonly core.$ZodType[]>(
+  schemas: T,
+  values: readonly unknown[],
+  _ctx?: core.ParseContext<core.$ZodIssue>,
+  _params?: { callee?: core.util.AnyFunc; Err?: core.$ZodErrorClass }
+) => Promise<{ [K in keyof T]: core.output<T[K]> }> = /* @__PURE__ */ core._parseArrayAsync(ZodRealError);
+
 export const safeParse: <T extends core.$ZodType>(
   schema: T,
   value: unknown,
