@@ -32,6 +32,19 @@ export const safeParseAsync: <T extends core.$ZodType>(
   _ctx?: core.ParseContext<core.$ZodIssue>
 ) => Promise<ZodSafeParseResult<core.output<T>>> = /* @__PURE__ */ core._safeParseAsync(ZodRealError) as any;
 
+export const parseArrayAsync: <T extends core.$ZodType>(
+  schema: T,
+  values: readonly unknown[],
+  _ctx?: core.ParseContext<core.$ZodIssue>,
+  _params?: { callee?: core.util.AnyFunc; Err?: core.$ZodErrorClass }
+) => Promise<core.output<T>[]> = /* @__PURE__ */ core._parseArrayAsync(ZodRealError);
+
+export const safeParseArrayAsync: <T extends core.$ZodType>(
+  schema: T,
+  values: readonly unknown[],
+  _ctx?: core.ParseContext<core.$ZodIssue>
+) => Promise<ZodSafeParseResult<core.output<T>>[]> = /* @__PURE__ */ core._safeParseArrayAsync(ZodRealError) as any;
+
 export { validate, validateAsync } from "../core/index.js";
 
 // Codec functions

@@ -118,6 +118,76 @@ export const _safeParseAsync: (_Err: $ZodErrorClass) => $SafeParseAsync = (_Err)
 
 export const safeParseAsync: $SafeParseAsync = /* @__PURE__*/ _safeParseAsync(errors.$ZodRealError);
 
+///////////        ARRAY ASYNC PARSE       ///////////
+
+// Every item's run is kicked off before the first await, so the promises settle in any order; the mapped array keeps each outcome at its own input index.
+function runArrayAsync(
+  schema: schemas.$ZodType,
+  values: readonly unknown[],
+  ctx: schemas.ParseContextInternal
+): Promise<schemas.ParsePayload[]> {
+  return Promise.all(
+    values.map(async (value, index) => {
+      let result = schema._zod.run({ value, issues: [] }, ctx);
+      if (result instanceof Promise) result = await result;
+      // the item index leads the path, so a failure points at its own slot no matter when it settled
+      for (let i = 0; i < result.issues.length; i++) {
+        const iss = result.issues[i]!;
+        result.issues[i] = { ...iss, path: [index, ...(iss.path ?? [])] };
+      }
+      return result;
+    })
+  );
+}
+
+export type $ParseArrayAsync = <T extends schemas.$ZodType>(
+  schema: T,
+  values: readonly unknown[],
+  _ctx?: schemas.ParseContext<errors.$ZodIssue>,
+  _params?: $ParseParams
+) => Promise<core.output<T>[]>;
+
+export const _parseArrayAsync: (_Err: $ZodErrorClass) => $ParseArrayAsync = (_Err) => {
+  const fn: $ParseArrayAsync = async (schema, values, _ctx, params) => {
+    const ctx: schemas.ParseContextInternal = _ctx ? { ..._ctx, async: true } : { async: true };
+    const results = await runArrayAsync(schema, values, ctx);
+    const issues: errors.$ZodRawIssue[] = [];
+    const out: unknown[] = new Array(values.length);
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i]!;
+      if (result.issues.length) issues.push(...result.issues);
+      else out[i] = result.value;
+    }
+    if (issues.length) {
+      const e = new (params?.Err ?? _Err)(issues.map((iss) => util.finalizeIssue(iss, ctx, core.config())));
+      util.captureStackTrace(e, params?.callee ?? fn);
+      throw e;
+    }
+    return out as core.output<typeof schema>[];
+  };
+  return fn;
+};
+
+export const parseArrayAsync: $ParseArrayAsync = /* @__PURE__*/ _parseArrayAsync(errors.$ZodRealError);
+
+export type $SafeParseArrayAsync = <T extends schemas.$ZodType>(
+  schema: T,
+  values: readonly unknown[],
+  _ctx?: schemas.ParseContext<errors.$ZodIssue>
+) => Promise<util.SafeParseResult<core.output<T>>[]>;
+
+export const _safeParseArrayAsync: (_Err: $ZodErrorClass) => $SafeParseArrayAsync =
+  (_Err) => async (schema, values, _ctx) => {
+    const ctx: schemas.ParseContextInternal = _ctx ? { ..._ctx, async: true } : { async: true };
+    const results = await runArrayAsync(schema, values, ctx);
+    // one result slot per input index: failures stay at their own index instead of shifting the successes around them
+    return results.map((result) =>
+      result.issues.length ? failure(_Err, result.issues, ctx) : ({ success: true, data: result.value } as any)
+    );
+  };
+
+export const safeParseArrayAsync: $SafeParseArrayAsync = /* @__PURE__*/ _safeParseArrayAsync(errors.$ZodRealError);
+
 // registry mirrors of the compiler's sentinels, so this module never imports the compiler
 const COMPILE_INVALID = /* @__PURE__ */ Symbol.for("zod.compile.invalid");
 const COMPILE_FALLBACK = /* @__PURE__ */ Symbol.for("zod.compile.fallback");

@@ -54,6 +54,22 @@ await Player.parseAsync({ username: "billie", xp: 100 });
 ```
 </Callout>
 
+### Parsing arrays asynchronously
+
+To run one async schema over many inputs, use the top-level `z.parseArrayAsync` / `z.safeParseArrayAsync` functions. Each item is parsed exactly once, all items run in parallel, and the results come back aligned with the original input indices — even if the items settle out of order. If an item fails, its issues are prefixed with that item's index, so a failure in the second item reports `path: [1]`.
+
+```ts
+const row = z.number().transform(async (id) => ({ id, label: await fetchLabel(id) }));
+
+// throws a ZodError if any item fails; issue paths are prefixed with the item index
+const rows = await z.parseArrayAsync(row, [1, 2, 3]);
+
+// per-item results, one slot per input index — failures don't shift other indices
+const results = await z.safeParseArrayAsync(row, [1, "nope", 3]);
+results[1].success; // false
+results[1].error?.issues[0].path; // [1]
+```
+
 ## Handling errors
 
 When validation fails, the `.parse()` method will throw a `ZodError` instance with granular information about the validation issues.
