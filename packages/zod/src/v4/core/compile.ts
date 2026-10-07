@@ -931,6 +931,7 @@ type SupportedSchemaType =
   | "readonly"
   | "success"
   | "default"
+  | "default_session"
   | "prefault"
   | "nonoptional"
   | "tuple"
@@ -1052,6 +1053,11 @@ function generateCheck(
     case "prefault":
       typeAccessor = generateDefaultCheck(doc, ctx, schema, accessor);
       break;
+    case "default_session":
+      // The per-parse factory session lives on the parse context, and a runtime island gets none
+      // (see `runtimeRun`), so islanding one field would re-run the factory per field instead of
+      // once per parse. Refuse non-islandably: the whole schema falls back to the runtime parser.
+      throw new ZodCompileUnsupportedError(`schema type ${type} (per-parse factory session)`, false);
     case "nonoptional":
       typeAccessor = generateNonOptionalCheck(doc, ctx, schema, accessor);
       break;

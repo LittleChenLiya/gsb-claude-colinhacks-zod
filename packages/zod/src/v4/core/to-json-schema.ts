@@ -783,6 +783,7 @@ function isTransforming(
     def.type === "nullable" ||
     def.type === "readonly" ||
     def.type === "default" ||
+    def.type === "default_session" ||
     def.type === "prefault" ||
     def.type === "catch"
   ) {

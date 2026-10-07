@@ -123,6 +123,8 @@ export interface ZodType<
   nullish(): ZodOptional<ZodNullable<this>>;
   default(def: util.NoUndefined<core.output<this>>): ZodDefault<this>;
   default(def: () => util.NoUndefined<core.output<this>>): ZodDefault<this>;
+  /** Default drawn from a per-parse factory session: within one top-level parse the factory runs at most once per `factoryId`, each field receiving an independent JSON copy of the session value. */
+  defaultSession(factoryId: string, factory: () => util.NoUndefined<core.output<this>>): ZodDefaultSession<this>;
   prefault(def: () => core.input<this>): ZodPrefault<this>;
   prefault(def: core.input<this>): ZodPrefault<this>;
   array(): ZodArray<this>;
@@ -247,6 +249,9 @@ export const ZodType: core.$constructor<ZodType> = /*@__PURE__*/ core.$construct
     },
     default(d) {
       return _default(this, d);
+    },
+    defaultSession(factoryId, factory) {
+      return defaultSession(this, factoryId, factory);
     },
     prefault(d) {
       return prefault(this, d);
@@ -2405,6 +2410,37 @@ export function _default<T extends core.SomeType>(
     get defaultValue() {
       return typeof defaultValue === "function" ? (defaultValue as Function)() : util.shallowClone(defaultValue);
     },
+  }) as any;
+}
+
+// ZodDefaultSession
+export interface ZodDefaultSession<T extends core.SomeType = core.$ZodType>
+  extends _ZodType<core.$ZodDefaultSessionInternals<T>>,
+    core.$ZodDefaultSession<T> {
+  "~standard": ZodStandardSchemaWithJSON<this>;
+  unwrap(): T;
+}
+export const ZodDefaultSession: core.$constructor<ZodDefaultSession> = /*@__PURE__*/ core.$constructor(
+  "ZodDefaultSession",
+  (inst, def) => {
+    core.$ZodDefaultSession.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => processors.defaultSessionProcessor(inst, ctx, json, params);
+
+    inst.unwrap = () => inst._zod.def.innerType;
+  }
+);
+
+export function defaultSession<T extends core.SomeType>(
+  innerType: T,
+  factoryId: string,
+  factory: () => util.NoUndefined<core.output<T>>
+): ZodDefaultSession<T> {
+  return new ZodDefaultSession({
+    type: "default_session",
+    innerType: innerType as any as core.$ZodType,
+    factoryId,
+    factory,
   }) as any;
 }
 

@@ -115,6 +115,7 @@ function isRecursive(inst: $ZodType, stack: Set<object>, resolve: boolean): Answ
     case "optional":
     case "nullable":
     case "default":
+    case "default_session":
     case "prefault":
     case "catch":
     case "readonly":

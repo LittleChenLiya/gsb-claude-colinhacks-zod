@@ -32,7 +32,12 @@ export interface ParseContextInternal<T extends errors.$ZodIssueBase = never> ex
   readonly skipChecks?: boolean;
   /** Set only by `validate`/`validateAsync`. A container may stop before its next child, never inside one, so a map entry and a tuple's fixed items parse whole. */
   readonly abortEarly?: boolean;
+  /** @internal Per-parse-session store for `$ZodDefaultSession` factories, keyed by factory ID. Created lazily on first use; because each top-level parse builds a fresh context, one parse shares one session and the next parse starts empty. */
+  defaultFactorySession?: DefaultFactorySession | undefined;
 }
+
+/** @internal Session state for `$ZodDefaultSession`: `pending` while a factory is on the stack (a second read is a circular default), otherwise the JSON snapshot every consumer clones from. */
+export type DefaultFactorySession = Map<string, { status: "pending" } | { status: "done"; snapshot: string }>;
 
 /** Gives a container cycle support: `attach` wraps its parse, and `alloc` registers the object it builds into before any child is parsed so a reference back to the same input resolves to it. */
 export interface $ZodMemoizer {
@@ -87,6 +92,7 @@ export interface $ZodTypeDef {
     | "success"
     | "transform"
     | "default"
+    | "default_session"
     | "prefault"
     | "catch"
     | "nan"
@@ -4089,6 +4095,145 @@ function handleDefaultResult(payload: ParsePayload, def: $ZodDefaultDef) {
 ////////////////////////////////////////////
 ////////////////////////////////////////////
 //////////                        //////////
+//////////   $ZodDefaultSession   //////////
+//////////                        //////////
+////////////////////////////////////////////
+////////////////////////////////////////////
+
+export interface $ZodDefaultSessionDef<T extends SomeType = $ZodType> extends $ZodTypeDef {
+  type: "default_session";
+  innerType: T;
+  /** Identifies the factory within a parse session. All `default_session` schemas sharing an ID share one evaluation per parse. */
+  factoryId: string;
+  /** Produces the session default. Invoked at most once per top-level parse per `factoryId`, and only when some field actually needs it. */
+  factory: () => util.NoUndefined<core.output<T>>;
+}
+
+export interface $ZodDefaultSessionInternals<T extends SomeType = $ZodType>
+  extends $ZodTypeInternals<util.NoUndefined<core.output<T>>, core.input<T> | undefined> {
+  def: $ZodDefaultSessionDef<T>;
+  optin: "defaulted";
+  optout?: "optional" | undefined; // required
+  isst: never;
+  values: T["_zod"]["values"];
+}
+
+export interface $ZodDefaultSession<T extends SomeType = $ZodType> extends $ZodType {
+  _zod: $ZodDefaultSessionInternals<T>;
+}
+
+export const $ZodDefaultSession: core.$constructor<$ZodDefaultSession> = /*@__PURE__*/ core.$constructor(
+  "$ZodDefaultSession",
+  (inst, def) => {
+    $ZodType.init(inst, def);
+
+    inst._zod.optin = "defaulted";
+    util.defineLazyInternal(inst, "values", (zod) => zod.def.innerType._zod.values);
+
+    inst._zod.parse = (payload, ctx) => {
+      if (ctx.direction === "backward") {
+        return def.innerType._zod.run(payload, ctx);
+      }
+
+      // Forward direction (decode): apply the session default for undefined input
+      if (payload.value === undefined) {
+        return applySessionDefault(payload, ctx, def, inst);
+      }
+      // Forward direction: continue with session-default handling
+      const result = def.innerType._zod.run(payload, ctx);
+      if (result instanceof Promise) {
+        return result.then((result) => {
+          if (result.value === undefined) return applySessionDefault(result, ctx, def, inst);
+          return result;
+        });
+      }
+      if (result.value === undefined) return applySessionDefault(result, ctx, def, inst);
+      return result;
+    };
+  }
+);
+
+/**
+ * Resolves the session default for `def.factoryId`, evaluating the factory on first use within this parse.
+ * Like `$ZodDefault`, the value is substituted without running the inner schema. Every consumer receives an
+ * independent copy revived from the session's JSON snapshot, so fields sharing a factory can never see each
+ * other's mutations. A factory that throws, a factory re-entered while still running, and a value that has no
+ * JSON representation (e.g. one with circular references) all fail the parse here — during the parse phase,
+ * before any downstream transform runs — rather than leaking a partially applied default.
+ */
+function applySessionDefault(
+  payload: ParsePayload,
+  ctx: ParseContextInternal,
+  def: $ZodDefaultSessionDef,
+  inst: $ZodDefaultSession
+): ParsePayload {
+  let session = ctx.defaultFactorySession;
+  if (!session) {
+    session = new Map();
+    ctx.defaultFactorySession = session;
+  }
+  const entry = session.get(def.factoryId);
+
+  if (entry?.status === "done") {
+    payload.value = JSON.parse(entry.snapshot);
+    return payload;
+  }
+
+  if (entry?.status === "pending") {
+    payload.issues.push(
+      util.issue(`Circular default factory "${def.factoryId}": the factory was re-entered before it returned`, payload.value, inst)
+    );
+    payload.aborted = true;
+    return payload;
+  }
+
+  session.set(def.factoryId, { status: "pending" });
+  let value: unknown;
+  try {
+    value = def.factory();
+  } catch (err) {
+    session.delete(def.factoryId);
+    payload.issues.push(
+      util.issue(
+        `Default factory "${def.factoryId}" threw: ${err instanceof Error ? err.message : String(err)}`,
+        payload.value,
+        inst
+      )
+    );
+    payload.aborted = true;
+    return payload;
+  }
+
+  // Snapshot once through JSON: it proves the value is JSON-representable (rejecting circular structures)
+  // and gives every later consumer of this session an independent copy to revive.
+  let snapshot: string;
+  try {
+    snapshot = JSON.stringify(value);
+  } catch {
+    session.delete(def.factoryId);
+    payload.issues.push(
+      util.issue(`Default factory "${def.factoryId}" returned a value that is not JSON-representable (circular default)`, payload.value, inst)
+    );
+    payload.aborted = true;
+    return payload;
+  }
+  if (snapshot === undefined) {
+    session.delete(def.factoryId);
+    payload.issues.push(
+      util.issue(`Default factory "${def.factoryId}" returned a value that is not JSON-representable`, payload.value, inst)
+    );
+    payload.aborted = true;
+    return payload;
+  }
+
+  session.set(def.factoryId, { status: "done", snapshot });
+  payload.value = JSON.parse(snapshot);
+  return payload;
+}
+
+////////////////////////////////////////////
+////////////////////////////////////////////
+//////////                        //////////
 //////////      $ZodPrefault      //////////
 //////////                        //////////
 ////////////////////////////////////////////
@@ -5150,6 +5295,7 @@ export type $ZodTypes =
   | $ZodLazy
   | $ZodOptional
   | $ZodDefault
+  | $ZodDefaultSession
   | $ZodPrefault
   | $ZodTemplateLiteral
   | $ZodCustom

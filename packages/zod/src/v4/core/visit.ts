@@ -130,6 +130,7 @@ export function visit(schema: schemas.SomeType, fnOrHandlers: VisitFn | VisitHan
       case "optional":
       case "nullable":
       case "default":
+      case "default_session":
       case "prefault":
       case "catch":
       case "readonly":
