@@ -326,18 +326,14 @@ test("mutually-recursive getter options are checked without resolving them", () 
   expect(tree.parse({ kind: "a", child: { kind: "b" } })).toEqual({ kind: "a", child: { kind: "b" } });
 });
 
-// removed to account for unions of unions
-// test("wrong schema - duplicate discriminator values", () => {
-//   try {
-//     z.discriminatedUnion("type",[
-//       z.object({ type: z.literal("a"), a: z.string() }),
-//       z.object({ type: z.literal("a"), b: z.string() }),
-//     ]);
-//     throw new Error();
-//   } catch (e: any) {
-//     expect(e.message.includes("Duplicate discriminator value")).toEqual(true);
-//   }
-// });
+test("wrong schema - duplicate discriminator values", () => {
+  expect(() =>
+    z.discriminatedUnion("type", [
+      z.object({ type: z.literal("a"), a: z.string() }),
+      z.object({ type: z.literal("a"), b: z.string() }),
+    ])
+  ).toThrow('Duplicate discriminator value "a" at options[0].type and options[1].type');
+});
 
 test("async - valid", async () => {
   const schema = await z.discriminatedUnion("type", [
@@ -908,18 +904,75 @@ test("undefined collisions are value-based and discriminator lookup rejects ambi
   expect(z.getDiscriminatedOption(unique, undefined)).toBe(absent);
 });
 
-test("non-undefined discriminator collisions remain schema errors", () => {
+test("non-undefined discriminator collisions are construction-time schema errors", () => {
   for (const tag of [z.literal("a").default("a"), z.literal(["a", "b"]), z.literal("a").nullable()]) {
-    const schema = z.discriminatedUnion("type", [z.object({ type: tag }), z.object({ type: tag })]);
-    expect(() => schema.safeParse({ type: "a" })).toThrow(/Duplicate discriminator value/);
-    expect(() => z.encode(schema, { type: "a" })).toThrow(/Duplicate discriminator value/);
-    expect(() => z.getDiscriminatedOption(schema, "a")).toThrow(/Duplicate discriminator value/);
+    expect(() => z.discriminatedUnion("type", [z.object({ type: tag }), z.object({ type: tag })])).toThrow(
+      'Duplicate discriminator value "a" at options[0].type and options[1].type'
+    );
   }
-  const nullable = z.discriminatedUnion("type", [
-    z.object({ type: z.literal("a").nullable() }),
-    z.object({ type: z.literal("b").nullable() }),
+  expect(() =>
+    z.discriminatedUnion("type", [
+      z.object({ type: z.literal("a").nullable() }),
+      z.object({ type: z.literal("b").nullable() }),
+    ])
+  ).toThrow('Duplicate discriminator value "null" at options[0].type and options[1].type');
+});
+
+test("duplicate discriminator pre-check reports branch indexes and field path without running transforms", () => {
+  // two-branch literal conflict, reported with both branch indexes and the field path
+  expect(() =>
+    z.discriminatedUnion("type", [
+      z.object({ type: z.literal("a"), a: z.string() }),
+      z.object({ type: z.literal("b"), b: z.string() }),
+      z.object({ type: z.literal("a"), c: z.string() }),
+    ])
+  ).toThrow('Duplicate discriminator value "a" at options[0].type and options[2].type');
+
+  // finite enum intersection
+  expect(() =>
+    z.discriminatedUnion("type", [z.object({ type: z.enum(["a", "b"]) }), z.object({ type: z.enum(["b", "c"]) })])
+  ).toThrow('Duplicate discriminator value "b" at options[0].type and options[1].type');
+
+  // the pre-check reads static value metadata only: no transform ever runs at construction
+  let transforms = 0;
+  const tag = (v: string) =>
+    z.literal(v).transform((x) => {
+      transforms++;
+      return x;
+    });
+  const schema = z.discriminatedUnion("type", [z.object({ type: tag("a") }), z.object({ type: tag("b") })]);
+  expect(transforms).toBe(0);
+  expect(schema.parse({ type: "a" })).toEqual({ type: "a" });
+  expect(transforms).toBe(1);
+  // a transformed literal still collides statically, again without running the transform
+  expect(() => z.discriminatedUnion("type", [z.object({ type: tag("a") }), z.object({ type: tag("a") })])).toThrow(
+    'Duplicate discriminator value "a" at options[0].type and options[1].type'
+  );
+  expect(transforms).toBe(1);
+
+  // a legal union constructs and parses exactly as before
+  const legal = z.discriminatedUnion("type", [
+    z.object({ type: z.literal("a"), a: z.string() }),
+    z.object({ type: z.enum(["b", "c"]), n: z.number() }),
   ]);
-  expect(() => nullable.safeParse({ type: "a" })).toThrow('Duplicate discriminator value "null"');
+  expect(legal.parse({ type: "a", a: "x" })).toEqual({ type: "a", a: "x" });
+  expect(legal.parse({ type: "c", n: 1 })).toEqual({ type: "c", n: 1 });
+  expect(legal.safeParse({ type: "d" }).success).toBe(false);
+});
+
+test("deferred discriminator collisions keep branch indexes and field path", () => {
+  // options that cannot be enumerated at construction (lazies, pipes) are still caught by the lazy lookup map
+  const a = z.object({ type: z.literal("a") });
+  const schema = z.discriminatedUnion("type", [a, z.lazy(() => a)]);
+  expect(() => schema.safeParse({ type: "a" })).toThrow(
+    'Duplicate discriminator value "a" at options[0].type and options[1].type'
+  );
+  expect(() => z.encode(schema, { type: "a" })).toThrow(
+    'Duplicate discriminator value "a" at options[0].type and options[1].type'
+  );
+  expect(() => z.getDiscriminatedOption(schema, "a")).toThrow(
+    'Duplicate discriminator value "a" at options[0].type and options[1].type'
+  );
 });
 
 test("nested defaulted unions only advertise routable discriminator values", () => {

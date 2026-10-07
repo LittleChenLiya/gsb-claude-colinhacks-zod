@@ -2663,22 +2663,41 @@ export function getDiscriminatedOption<
   return option as any;
 }
 
+/** Where in `options` a discriminator field sits, e.g. `options[2].type` — branch index plus field path. */
+function discriminatorPath(def: $ZodDiscriminatedUnionDef<readonly SomeType[]>, index: number): string {
+  const key = def.discriminator;
+  const segment = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? `.${key}` : `[${JSON.stringify(key)}]`;
+  return `options[${index}]${segment}`;
+}
+
+function duplicateDiscriminatorError(
+  def: $ZodDiscriminatedUnionDef<readonly SomeType[]>,
+  value: util.Primitive,
+  firstIndex: number,
+  secondIndex: number
+): Error {
+  return new Error(
+    `Duplicate discriminator value "${String(value)}" at ${discriminatorPath(def, firstIndex)} and ${discriminatorPath(def, secondIndex)}`
+  );
+}
+
 function discriminatorMap(def: $ZodDiscriminatedUnionDef<readonly SomeType[]>): Map<util.Primitive, $ZodType | null> {
   const map = new Map<util.Primitive, $ZodType | null>();
-  for (const option of def.options as readonly $ZodType[]) {
+  const claimedAt = new Map<util.Primitive, number>();
+  (def.options as readonly $ZodType[]).forEach((option, i) => {
     const values = option._zod.propValues?.[def.discriminator];
-    if (!values || values.size === 0)
-      throw new Error(`Invalid discriminated union option at index "${def.options.indexOf(option)}"`);
+    if (!values || values.size === 0) throw new Error(`Invalid discriminated union option at index "${i}"`);
     for (const value of values) {
       if (map.has(value)) {
-        if (value !== undefined) throw new Error(`Duplicate discriminator value "${String(value)}"`);
+        if (value !== undefined) throw duplicateDiscriminatorError(def, value, claimedAt.get(value)!, i);
         // keep the collision marked so a later member cannot reclaim it
         map.set(value, null);
       } else {
         map.set(value, option);
+        claimedAt.set(value, i);
       }
     }
-  }
+  });
   return map;
 }
 
@@ -2723,6 +2742,30 @@ export const $ZodDiscriminatedUnion: core.$constructor<$ZodDiscriminatedUnion> =
       const propShape = util.rawShape(option._zod.def);
       if (propShape && !Object.prototype.hasOwnProperty.call(propShape, def.discriminator)) {
         throw new Error(`Invalid discriminated union option at index "${i}"`);
+      }
+    });
+
+    // Pre-check for duplicate discriminator values, so a conflict between statically enumerable
+    // discriminators — literals, finite enums, and their optional/nullable/defaulted wrappers —
+    // fails at the `discriminatedUnion` call with the colliding branch indexes and field path,
+    // instead of on the first object parsed. Only static value metadata is read, so no transform
+    // ever runs here; options that cannot be enumerated without resolution (pipes, lazies,
+    // accessor-declared fields) are left to the lazy lookup map below, which reports the same
+    // error. `undefined` claims stay value-based: omittable discriminators collide silently and
+    // the map marks them ambiguous.
+    const claimedAt = new Map<util.Primitive, number>();
+    def.options.forEach((option, i) => {
+      const propShape = util.rawShape(option._zod.def);
+      const desc = propShape ? Object.getOwnPropertyDescriptor(propShape, def.discriminator) : undefined;
+      if (!desc || !("value" in desc)) return;
+      const field = desc.value as $ZodType | undefined;
+      const values = field?._zod?.values;
+      if (!values) return;
+      for (const value of values) {
+        if (value === undefined) continue;
+        const first = claimedAt.get(value);
+        if (first !== undefined) throw duplicateDiscriminatorError(def, value, first, i);
+        claimedAt.set(value, i);
       }
     });
 
