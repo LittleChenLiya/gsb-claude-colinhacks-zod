@@ -563,6 +563,11 @@ export function shallowClone(o: any): any {
   return o;
 }
 
+/** Deep-copies a JSON value. Throws on circular structures and non-JSON values (functions, symbols, BigInt, ...). */
+export function jsonClone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value));
+}
+
 export function numKeys(data: any): number {
   let keyCount = 0;
   for (const key in data) {

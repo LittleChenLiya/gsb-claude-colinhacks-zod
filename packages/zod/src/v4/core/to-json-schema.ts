@@ -784,6 +784,7 @@ function isTransforming(
     def.type === "readonly" ||
     def.type === "default" ||
     def.type === "prefault" ||
+    def.type === "default_session" ||
     def.type === "catch"
   ) {
     return isTransforming(def.innerType, ctx);

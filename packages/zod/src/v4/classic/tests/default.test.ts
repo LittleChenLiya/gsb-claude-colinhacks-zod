@@ -453,3 +453,175 @@ test("default factory does not run at compile time", () => {
   expect(compiled.parse({})).toEqual({ a: "d" });
   expect(calls).toBe(1);
 });
+
+test("defaultSession factory runs once per parse across fields, with independent copies", () => {
+  let calls = 0;
+  const factory = () => {
+    calls++;
+    return { n: calls, tags: ["x"] };
+  };
+  const inner = z.object({ n: z.number(), tags: z.array(z.string()) });
+  const schema = z.object({
+    a: inner.defaultSession(factory),
+    b: inner.defaultSession(factory),
+  });
+
+  // one parse => one factory call, shared by both fields
+  const r1 = schema.parse({});
+  expect(calls).toBe(1);
+  expect(r1.a).toEqual({ n: 1, tags: ["x"] });
+  expect(r1.b).toEqual({ n: 1, tags: ["x"] });
+
+  // each field gets an independent JSON copy
+  expect(r1.a).not.toBe(r1.b);
+  expect(r1.a.tags).not.toBe(r1.b.tags);
+  r1.a.n = 999;
+  r1.a.tags.push("mutated");
+  expect(r1.b).toEqual({ n: 1, tags: ["x"] });
+
+  // the next parse re-evaluates the factory
+  const r2 = schema.parse({});
+  expect(calls).toBe(2);
+  expect(r2.a).toEqual({ n: 2, tags: ["x"] });
+  expect(r2.b).toEqual({ n: 2, tags: ["x"] });
+
+  // present values skip the factory entirely
+  expect(schema.parse({ a: { n: 5, tags: [] } })).toEqual({ a: { n: 5, tags: [] }, b: { n: 3, tags: ["x"] } });
+  expect(calls).toBe(3);
+});
+
+test("defaultSession shares one evaluation per explicit factory id", () => {
+  let calls = 0;
+  const schema = z.object({
+    a: z.number().defaultSession(() => {
+      calls++;
+      return 10;
+    }, "shared-id"),
+    b: z.number().defaultSession(() => {
+      calls++;
+      return 20;
+    }, "shared-id"),
+    c: z.number().defaultSession(() => {
+      calls++;
+      return 30;
+    }, "other-id"),
+  });
+
+  // first factory registered under an id wins for the whole session
+  expect(schema.parse({})).toEqual({ a: 10, b: 10, c: 30 });
+  expect(calls).toBe(2);
+});
+
+test("defaultSession runs the default through the inner pipeline", () => {
+  let transforms = 0;
+  const inner = z.string().transform((v) => {
+    transforms++;
+    return v.toUpperCase();
+  });
+  const schema = z.object({
+    a: inner.defaultSession(() => "hello"),
+    b: inner.defaultSession(() => "hello"),
+  });
+
+  expect(schema.parse({})).toEqual({ a: "HELLO", b: "HELLO" });
+  expect(transforms).toBe(2);
+});
+
+test("defaultSession failing factory rejects before any transform runs", () => {
+  let calls = 0;
+  let transforms = 0;
+  const inner = z.string().transform((v) => {
+    transforms++;
+    return v.toUpperCase();
+  });
+  const factory = () => {
+    calls++;
+    throw new Error("boom");
+  };
+  const schema = z.object({
+    a: inner.defaultSession(factory),
+    b: inner.defaultSession(factory),
+  });
+
+  const result = schema.safeParse({});
+  expect(result.success).toBe(false);
+  // the factory ran once for the session, and zero transforms executed
+  expect(calls).toBe(1);
+  expect(transforms).toBe(0);
+  if (!result.success) {
+    expect(result.error.issues).toHaveLength(2);
+    expect(result.error.issues[0]!.message).toBe("Session default factory failed: boom");
+  }
+  expect(() => schema.parse({})).toThrow();
+});
+
+test("defaultSession circular default value rejects before any transform runs", () => {
+  let transforms = 0;
+  const inner = z
+    .object({ n: z.number() })
+    .transform((v) => {
+      transforms++;
+      return v;
+    });
+  const factory = () => {
+    const o: any = { n: 1 };
+    o.self = o; // circular: not a JSON value
+    return o;
+  };
+  const schema = z.object({
+    a: inner.defaultSession(factory),
+    b: inner.defaultSession(factory),
+  });
+
+  const result = schema.safeParse({});
+  expect(result.success).toBe(false);
+  expect(transforms).toBe(0);
+  if (!result.success) {
+    expect(result.error.issues[0]!.message).toMatch(/^Session default factory failed: /);
+  }
+});
+
+test("defaultSession re-entrant factory rejects as circular", () => {
+  const ctx: any = {};
+  let innerPayload: any;
+  const schema = z.number().defaultSession(() => {
+    // re-enter the same schema within the same parse session (same ctx object)
+    innerPayload = schema._zod.run({ value: undefined, issues: [] }, ctx);
+    return 1;
+  });
+
+  const payload = schema._zod.run({ value: undefined, issues: [] }, ctx) as any;
+  // the re-entrant read sees the pending evaluation and rejects as circular
+  expect(innerPayload.issues).toHaveLength(1);
+  expect(innerPayload.issues[0].message).toBe(
+    "Circular session default: the factory was re-entered before it produced a value"
+  );
+  // the outer evaluation is unaffected
+  expect(payload.issues).toHaveLength(0);
+  expect(payload.value).toBe(1);
+});
+
+test("defaultSession direction-aware: skipped on encode", () => {
+  let calls = 0;
+  const schema = z.string().defaultSession(() => {
+    calls++;
+    return "d";
+  });
+
+  expect(schema.parse(undefined)).toBe("d");
+  expect(calls).toBe(1);
+  expect(() => z.encode(schema, undefined as any)).toThrow();
+  expect(calls).toBe(1);
+  expect(z.encode(schema, "world")).toBe("world");
+});
+
+test("defaultSession unwrap and types", () => {
+  const schema = z.string().defaultSession(() => "d");
+  expect(schema).toBeInstanceOf(z.ZodDefaultSession);
+  expect(schema.unwrap()).toBeInstanceOf(z.ZodString);
+
+  type inp = z.input<typeof schema>;
+  expectTypeOf<inp>().toEqualTypeOf<string | undefined>();
+  type out = z.output<typeof schema>;
+  expectTypeOf<out>().toEqualTypeOf<string>();
+});

@@ -125,6 +125,7 @@ export interface ZodType<
   default(def: () => util.NoUndefined<core.output<this>>): ZodDefault<this>;
   prefault(def: () => core.input<this>): ZodPrefault<this>;
   prefault(def: core.input<this>): ZodPrefault<this>;
+  defaultSession(factory: () => util.NoUndefined<core.output<this>>, factoryId?: unknown): ZodDefaultSession<this>;
   array(): ZodArray<this>;
   or<T extends core.SomeType>(option: T): ZodUnion<[this, T]>;
   and<T extends core.SomeType>(incoming: T): ZodIntersection<this, T>;
@@ -250,6 +251,9 @@ export const ZodType: core.$constructor<ZodType> = /*@__PURE__*/ core.$construct
     },
     prefault(d) {
       return prefault(this, d);
+    },
+    defaultSession(factory, factoryId) {
+      return defaultSession(this, factory, factoryId);
     },
     catch(params) {
       return _catch(this, params);
@@ -2435,6 +2439,42 @@ export function prefault<T extends core.SomeType>(
     get defaultValue() {
       return typeof defaultValue === "function" ? (defaultValue as Function)() : util.shallowClone(defaultValue);
     },
+  }) as any;
+}
+
+// ZodDefaultSession
+export interface ZodDefaultSession<T extends core.SomeType = core.$ZodType>
+  extends _ZodType<core.$ZodDefaultSessionInternals<T>>,
+    core.$ZodDefaultSession<T> {
+  "~standard": ZodStandardSchemaWithJSON<this>;
+  unwrap(): T;
+}
+export const ZodDefaultSession: core.$constructor<ZodDefaultSession> = /*@__PURE__*/ core.$constructor(
+  "ZodDefaultSession",
+  (inst, def) => {
+    core.$ZodDefaultSession.init(inst, def);
+    ZodType.init(inst, def);
+    inst._zod.processJSONSchema = (ctx, json, params) => processors.defaultSessionProcessor(inst, ctx, json, params);
+    inst.unwrap = () => inst._zod.def.innerType;
+  }
+);
+
+/**
+ * Session-scoped default factory. Within a single parse, all fields sharing one `factoryId`
+ * (the factory function itself, unless an explicit ID is passed) evaluate the factory once and
+ * each receive an independent JSON copy of the produced value. The next parse re-evaluates.
+ * A throwing factory or a circular (non-JSON) default rejects the parse before any transform runs.
+ */
+export function defaultSession<T extends core.SomeType>(
+  innerType: T,
+  factory: () => util.NoUndefined<core.output<T>>,
+  factoryId?: unknown
+): ZodDefaultSession<T> {
+  return new ZodDefaultSession({
+    type: "default_session",
+    innerType: innerType as any as core.$ZodType,
+    factory,
+    factoryId: factoryId ?? factory,
   }) as any;
 }
 

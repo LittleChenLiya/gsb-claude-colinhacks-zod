@@ -88,6 +88,7 @@ export interface $ZodTypeDef {
     | "transform"
     | "default"
     | "prefault"
+    | "default_session"
     | "catch"
     | "nan"
     | "pipe"
@@ -4136,6 +4137,126 @@ export const $ZodPrefault: core.$constructor<$ZodPrefault> = /*@__PURE__*/ core.
   }
 );
 
+////////////////////////////////////////////
+////////////////////////////////////////////
+//////////                        //////////
+//////////   $ZodDefaultSession   //////////
+//////////                        //////////
+////////////////////////////////////////////
+////////////////////////////////////////////
+
+export interface $ZodDefaultSessionDef<T extends SomeType = $ZodType> extends $ZodTypeDef {
+  type: "default_session";
+  innerType: T;
+  /** Produces the session default. Runs at most once per `factoryId` per parse session. */
+  factory: () => util.NoUndefined<core.output<T>>;
+  /** Identity of the factory within a parse session. Defaults to the factory function itself, so fields sharing one factory share one evaluation. */
+  factoryId: unknown;
+}
+
+export interface $ZodDefaultSessionInternals<T extends SomeType = $ZodType>
+  extends $ZodTypeInternals<core.output<T>, core.input<T> | undefined> {
+  def: $ZodDefaultSessionDef<T>;
+  optin: "defaulted";
+  optout?: "optional" | undefined;
+  isst: never;
+  values: T["_zod"]["values"];
+}
+
+export interface $ZodDefaultSession<T extends SomeType = $ZodType> extends $ZodType {
+  _zod: $ZodDefaultSessionInternals<T>;
+}
+
+type $ZodDefaultSessionEntry =
+  | { status: "pending" }
+  | { status: "done"; value: unknown }
+  | { status: "failed"; error: unknown };
+
+/**
+ * Session caches, keyed on the parse context. Every top-level parse builds a fresh context object,
+ * so an entry lives exactly one parse session; nested containers share it through the forwarded context.
+ */
+const $ZodDefaultSessionCaches: WeakMap<ParseContextInternal, Map<unknown, $ZodDefaultSessionEntry>> =
+  /*@__PURE__*/ new WeakMap();
+
+export const $ZodDefaultSession: core.$constructor<$ZodDefaultSession> = /*@__PURE__*/ core.$constructor(
+  "$ZodDefaultSession",
+  (inst, def) => {
+    $ZodType.init(inst, def);
+
+    inst._zod.optin = "defaulted";
+    util.defineLazyInternal(inst, "values", (zod) => zod.def.innerType._zod.values);
+
+    inst._zod.parse = (payload, ctx) => {
+      if (ctx.direction === "backward") {
+        return def.innerType._zod.run(payload, ctx);
+      }
+
+      // Forward direction (decode): resolve the session default for undefined input
+      if (payload.value === undefined) {
+        const resolved = resolveDefaultSession(inst, def, ctx);
+        if (resolved.ok === false) {
+          // factory failure or circular default: reject before the inner schema (and its transforms) runs
+          payload.issues.push(resolved.issue);
+          return payload;
+        }
+        payload.value = resolved.value;
+      }
+      return def.innerType._zod.run(payload, ctx);
+    };
+  }
+);
+
+function resolveDefaultSession(
+  inst: $ZodDefaultSession,
+  def: $ZodDefaultSessionDef,
+  ctx: ParseContextInternal
+): { ok: true; value: unknown } | { ok: false; issue: errors.$ZodRawIssue } {
+  let cache = $ZodDefaultSessionCaches.get(ctx);
+  if (!cache) {
+    cache = new Map();
+    $ZodDefaultSessionCaches.set(ctx, cache);
+  }
+
+  let entry = cache.get(def.factoryId);
+  if (!entry) {
+    entry = { status: "pending" };
+    cache.set(def.factoryId, entry);
+    try {
+      // canonicalize once per session: a circular or otherwise non-JSON default is rejected here
+      entry = { status: "done", value: util.jsonClone(def.factory()) };
+    } catch (error) {
+      entry = { status: "failed", error };
+    }
+    cache.set(def.factoryId, entry);
+  }
+
+  if (entry.status === "pending") {
+    return {
+      ok: false,
+      issue: {
+        code: "custom",
+        input: undefined,
+        inst,
+        message: "Circular session default: the factory was re-entered before it produced a value",
+      },
+    };
+  }
+  if (entry.status === "failed") {
+    return {
+      ok: false,
+      issue: {
+        code: "custom",
+        input: undefined,
+        inst,
+        message: `Session default factory failed: ${entry.error instanceof Error ? entry.error.message : String(entry.error)}`,
+      },
+    };
+  }
+  // every field gets its own JSON copy of the session value
+  return { ok: true, value: util.jsonClone(entry.value) };
+}
+
 ///////////////////////////////////////////////
 ///////////////////////////////////////////////
 //////////                           //////////
@@ -5151,6 +5272,7 @@ export type $ZodTypes =
   | $ZodOptional
   | $ZodDefault
   | $ZodPrefault
+  | $ZodDefaultSession
   | $ZodTemplateLiteral
   | $ZodCustom
   | $ZodTransform

@@ -62,6 +62,8 @@ test("first party switch", () => {
       break;
     case "prefault":
       break;
+    case "default_session":
+      break;
     case "template_literal":
       break;
     case "custom":
@@ -149,6 +151,8 @@ test("$ZodSchemaTypes", () => {
     case "default":
       break;
     case "prefault":
+      break;
+    case "default_session":
       break;
     case "template_literal":
       break;

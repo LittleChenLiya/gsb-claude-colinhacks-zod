@@ -932,6 +932,7 @@ type SupportedSchemaType =
   | "success"
   | "default"
   | "prefault"
+  | "default_session"
   | "nonoptional"
   | "tuple"
   | "union"
@@ -1052,6 +1053,10 @@ function generateCheck(
     case "prefault":
       typeAccessor = generateDefaultCheck(doc, ctx, schema, accessor);
       break;
+    case "default_session":
+      // Session defaults are keyed on the parse context, which generated code never receives — and a
+      // runtime island gets a fresh context per call, so islanding would give every field its own session.
+      throw new ZodCompileUnsupportedError(`schema type ${type}`, false);
     case "nonoptional":
       typeAccessor = generateNonOptionalCheck(doc, ctx, schema, accessor);
       break;

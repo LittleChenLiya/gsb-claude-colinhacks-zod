@@ -776,6 +776,14 @@ export const prefaultProcessor: Processor<schemas.$ZodPrefault> = (schema, ctx, 
   if (value !== UNREPRESENTABLE_DEFAULT) json._prefault = value;
 };
 
+export const defaultSessionProcessor: Processor<schemas.$ZodDefaultSession> = (schema, ctx, _json, params) => {
+  const def = schema._zod.def as schemas.$ZodDefaultSessionDef;
+  processSchema(def.innerType, ctx as any, params);
+  const seen = ctx.seen.get(schema)!;
+  seen.ref = def.innerType;
+  // the factory is session-scoped and must not run at schema-generation time, so no `default` is emitted
+};
+
 export const catchProcessor: Processor<schemas.$ZodCatch> = (schema, ctx, json, params) => {
   const def = schema._zod.def as schemas.$ZodCatchDef;
   processSchema(def.innerType, ctx as any, params);
@@ -865,6 +873,7 @@ export const allProcessors: Record<string, Processor<any>> = {
   nonoptional: nonoptionalProcessor,
   default: defaultProcessor,
   prefault: prefaultProcessor,
+  default_session: defaultSessionProcessor,
   catch: catchProcessor,
   pipe: pipeProcessor,
   readonly: readonlyProcessor,

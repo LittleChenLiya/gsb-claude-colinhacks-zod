@@ -42,6 +42,8 @@ export type DeepPartial<T extends core.SomeType> =
     ? schemas.ZodDefault<DeepPartial<Inner>>
   : T extends schemas.ZodPrefault<infer Inner>
     ? schemas.ZodPrefault<DeepPartial<Inner>>
+  : T extends schemas.ZodDefaultSession<infer Inner>
+    ? schemas.ZodDefaultSession<DeepPartial<Inner>>
   : T extends schemas.ZodNonOptional<infer Inner>
     ? schemas.ZodNonOptional<DeepPartial<Inner>>
   : T extends schemas.ZodCatch<infer Inner>
